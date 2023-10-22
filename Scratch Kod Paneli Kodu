@@ -1,0 +1,992 @@
+// ==UserScript==
+// @name         Tampermonkey Scratch Kod Paneli
+// @namespace    http://tampermonkey.net/
+// @version      56.0
+// @description  Kullanıcı bilgileri için Scratch veri menüsünü gösterir.
+// @author       games-coder
+// @match        https://scratch.mit.edu/*
+// @icon         https://media.discordapp.net/attachments/1098949360861069352/1129000348686766170/userlmn_7d0ebcb9330827b3b93376432d9b81a1.png
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    var isDragging = false;
+    var startWidth, startHeight;
+    var startOffsetX, startOffsetY;
+
+    GM_addStyle(`
+    @import url('https://fonts.googleapis.com/css2?family=FONTISMI&display=swap');
+
+    body {
+        font-family: 'FONTISMI', sans-serif;
+        background-color: #111; /* Karanlık tema rengi */
+    }
+    #scratch-menu {
+        border-radius: 15px;
+        background-color: rgba(0, 0, 0, 0.80); /* %15 blurlu arka plan */
+        backdrop-filter: blur(15px); /* %15 blurlu arka plan */
+        color: white;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 1.5);
+        border: 2px solid white; /* Beyaz kenarlık */
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 1000px;
+        height: 600px;
+        z-index: 9999;
+        display: none;
+    }
+    #scratch-menu-header {
+        border-radius: 15px 15px 0 0;
+        background-color: #131313; /* Menü başlık rengi */
+        padding: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 5px 10px rgba(0, 0, 0, 0.3);
+        cursor: move;
+    }
+    #scratch-menu-header span {
+        display: flex;
+        align-items: center;
+    }
+    #scratch-menu-header img {
+        width: 25px;
+        height: 25px;
+        margin-right: 10px;
+    }
+    #font-selector {
+        display: flex;
+        align-items: center;
+    }
+    #font-selector select {
+        margin-right: 10px;
+    }
+    #scratch-data img {
+        border-radius: 8px;
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+    }
+    #scratch-data li, #scratch-data p {
+        font-size: 18px;
+    }
+    .data-container {
+        display: flex;
+        align-items: center;
+        margin: 10px 0;
+    }
+    .data-label {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+    .data-value {
+        margin-right: 15px;
+    }
+    #scratch-input, #scratch-combo, #scratch-search-btn {
+        background-color: black; /* Yazı yazma alanı (Combo box) ve "Search" butonunun arka planı siyah */
+        border: 2px solid white;
+    }
+    #scratch-search-btn {
+        background-color: black; /* "Search" butonunun arka planını siyah yap */
+        border: 2px solid white;
+    }
+`);
+
+var menuHtml = `
+<div id="scratch-menu">
+    <div id="scratch-menu-header">
+        <span>
+            <img src="https://static.scratchstats.com/img/icon.456189d.png" alt="Logo">
+            <span style="margin-right: 10px;">Scratch Data Panel</span>
+        </span>
+        <div id="scratch-menu-controls" style="display: flex;">
+            <div id="scratch-menu-minimize" style="cursor: pointer; margin-right: 10px; font-size: 24px;"></div>
+            <div id="scratch-menu-restore" style="cursor: pointer; margin-right: 10px; font-size: 24px; display: none;"></div>
+            <div id="scratch-menu-close" style="cursor: pointer; font-size: 24px; color: Red;">×</div>
+        </div>
+    </div>
+    <input id="scratch-input" type="text" placeholder="🔍 Enter the username." style="width: 46%; margin: 15px; padding: 10px; border: 2px solid white; border-radius: 8px; box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);">
+   <select id="scratch-combo" style="margin: 15px; padding: 10px; border-radius: 8px; border: none; border: 2px solid white; box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);">
+    <option value="userinfo">👤 User Info</option>
+    <option value="followers">👥 Followers</option>
+    <option value="following">➡️ Following</option>
+    <option value="comments">📰 Profile Comments</option>
+    <option value="activity">🎞️ User Activities</option>
+    <option value="projects">🎮 Projects</option>
+    <option value="favorites">⭐ Favorite Projects</option>
+    <option value="search">🔍 Popular Search Results</option>
+    <option value="search2">🔍 Trending Search Results</option>
+    <option value="studios">🎭 Studios</option>
+    <option value="forum">🎟️ Scratch Forum</option>
+    <option value="news">📰 Scratch News</option>
+    <option value="explore">🌐 Explore Scratch</option>
+</select>
+    <button id="scratch-search-btn" style="margin: 15px; padding: 10px 20px; background-color: black; color: white; border-radius: 8px; border: 2px solid white; cursor: pointer; box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);">Search</button>
+    <div id="scratch-data" style="overflow-y: scroll; height: 440px; padding: 15px;"></div>
+</div>
+`;
+document.body.insertAdjacentHTML('beforeend', menuHtml);
+
+
+// Menüyü açma işlevi
+function openMenu() {
+    document.getElementById('scratch-menu').style.display = 'block';
+}
+
+// Menüyü kapatma işlevi
+function closeMenu() {
+    document.getElementById('scratch-menu').style.display = 'none';
+}
+
+// Menüyü küçültme işlevi
+function minimizeMenu() {
+    document.getElementById('scratch-menu').style.height = '30px';
+    document.getElementById('scratch-menu-header').style.borderRadius = '10px';
+    document.getElementById('scratch-menu-restore').style.display = 'inline-block';
+    document.getElementById('scratch-menu-minimize').style.display = 'none';
+}
+
+// Menüyü geri yükleme işlevi
+function restoreMenu() {
+    document.getElementById('scratch-menu').style.height = '600px';
+    document.getElementById('scratch-menu-header').style.borderRadius = '10px 10px 0 0';
+    document.getElementById('scratch-menu-restore').style.display = 'none';
+    document.getElementById('scratch-menu-minimize').style.display = 'inline-block';
+}
+
+// 'Tab' tuşuna basıldığını algılamak için olay dinleyici ekleme
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Tab') {
+        event.preventDefault(); // Tarayıcı varsayılan işlemi engellemek için
+        if (document.getElementById('scratch-menu').style.display === 'block') {
+            closeMenu(); // Menüyü kapatmak için closeMenu fonksiyonunu çağırın
+        } else {
+            openMenu(); // Menüyü açmak için openMenu fonksiyonunu çağırın
+        }
+    }
+});
+
+
+  // Menüyü sürükle ve taşı ve ortala
+var menu = document.getElementById('scratch-menu');
+var menuHeader = document.getElementById('scratch-menu-header');
+
+menuHeader.addEventListener('mousedown', function (e) {
+    isDragging = true;
+    startWidth = menu.offsetWidth;
+    startHeight = menu.offsetHeight;
+    startOffsetX = e.clientX - menu.getBoundingClientRect().left;
+    startOffsetY = e.clientY - menu.getBoundingClientRect().top;
+    menu.style.transition = 'none';
+});
+
+// Menüyü ortala
+function centerMenu() {
+    var screenWidth = window.innerWidth;
+    var screenHeight = window.innerHeight;
+
+    var menuWidth = menu.offsetWidth;
+    var menuHeight = menu.offsetHeight;
+
+    var centerX = (screenWidth - menuWidth) / 2;
+    var centerY = (screenHeight - menuHeight) / 2;
+
+    menu.style.left = centerX + 'px';
+    menu.style.top = centerY + 'px';
+}
+
+
+  // Menüyü Küçültme Olay Dinleyici
+  document.getElementById('scratch-menu-minimize').addEventListener('click', minimizeMenu);
+
+  // Menüyü Geri Yükleme Olay Dinleyici
+  document.getElementById('scratch-menu-restore').addEventListener('click', restoreMenu);
+
+  // Menüyü Kapatma Olay Dinleyici
+  document.getElementById('scratch-menu-close').addEventListener('click', closeMenu);
+
+  // Arama Düğmesi Tıklama Olayı
+  document.getElementById('scratch-search-btn').addEventListener('click', function () {
+    var username = document.getElementById('scratch-input').value.trim();
+    var selected = document.getElementById('scratch-combo').value;
+    if (username !== '' && selected !== 'none') {
+      fetchData(username, selected);
+    }
+  });
+
+  // Scratch API'den Kullanıcı Verilerini Alın
+  function fetchData(username, selectedOption) {
+    var apiUrl = 'https://api.scratch.mit.edu/users/' + username;
+    fetch(apiUrl)
+      .then(function (response) {
+        return response.json();
+      })
+      .then(function (data) {
+        data = fillMissingData(data);
+        switch (selectedOption) {
+          case 'userinfo':
+            displayUserInfo(data);
+            break;
+          case 'followers':
+            fetchFollowers(username);
+            break;
+          case 'following':
+            fetchFollowing(username);
+            break;
+          case 'projects':
+            fetchProjects(username);
+            break;
+          case 'favorites':
+            fetchFavoriteProjects(username);
+            break;
+          case 'explore':
+            var exploreTerm = username;
+            exploreProjects(exploreTerm);
+            break;
+          case 'studios':
+            var StudiosTerm = username;
+            fetchStudios(username);
+            break;
+          case 'search':
+            var searchTerm = username;
+            searchProjects(searchTerm);
+            break;
+          case 'search2':
+            var search2Term = username;
+            search2Projects(search2Term);
+            break;
+          case 'comments':
+           fetchUserComments(username);
+            break;
+          case 'news':
+           fetchUserNews(username);
+            break;
+          case 'forum':
+           fetchUserForum(username);
+            break;
+          case 'activity':
+           fetchUserActivity(username);
+            break;
+        }
+      })
+      .catch(function (error) {
+        console.log('Bir hata oluştu:', error);
+      });
+  }
+
+  // Eksik Verileri Doldurma
+  function fillMissingData(data) {
+    if (!data.hasOwnProperty('id')) {
+      data.id = -1;
+    }
+    if (!data.hasOwnProperty('username')) {
+      data.username = 'Kullanıcı Adı Yok';
+    }
+    if (!data.hasOwnProperty('scratchteam')) {
+      data.scratchteam = false;
+    }
+    if (!data.hasOwnProperty('history')) {
+      data.history = {
+        joined: 'Tarih Bilgisi Yok'
+      };
+    }
+    if (!data.hasOwnProperty('profile')) {
+      data.profile = {
+        id: -1,
+        images: {
+          '90x90': '',
+          '60x60': '',
+          '55x55': '',
+          '50x50': '',
+          '32x32': ''
+        },
+        status: 'Durum Bilgisi Yok',
+        bio: 'Bio Bilgisi Yok',
+        country: 'Ülke Bilgisi Yok'
+      };
+    }
+    return data;
+  }
+
+   // Menüde kullanıcı bilgilerini gösterme
+function displayUserInfo(data) {
+  // Katılma tarihini özel bir formatta oluşturun
+  var joinDate = new Date(data.history.joined);
+  var dayOfWeek = getDayOfWeek(joinDate.getDay()); // Günün adını al
+  var formattedJoinDate = `${joinDate.getDate()} ${getMonthName(joinDate.getMonth())} ${dayOfWeek} ${joinDate.getFullYear()} - ${joinDate.getHours()}:${joinDate.getMinutes()}`;
+
+  var userInfoHtml = `
+    <p class="data-container" style="font-size: 20px; margin: 10px 0;"><span class="data-value">${data.username}</span></p>
+    <p><img src="${data.profile.images['90x90']}" alt="Profil Resmi" style="border: 3px solid white; width: 180px; height: 180px; border-radius: 20px;"></p>
+    <p class="data-container" style="font-size: 15px;"><a href="https://scratch.mit.edu/users/${data.username}/" target="_blank">↗️ Scratch'te profili aç</a></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">🔍 Kimlik:</span><span class="data-value">${data.id}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">👤 Kullanıcı Adı:</span><span class="data-value">${data.username}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">📅 Katılma Tarihi:</span><span class="data-value">${formattedJoinDate}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">⏰ Zaman:</span><span class="data-value" id="elapsed-time-${data.username}" style="font-size: 15px;"></span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">📬 Okunmamış Mesajlar:</span><span class="data-value" id="unread-messages-${data.username}" style="font-size: 15px;">Yükleniyor...</span></p>
+    <div class="data-followers">
+      <span class="data-label" style="font-size: 15px;">⛓️ Takipçiler:</span>
+      <span class="data-value" id="followers-count" style="font-size: 15px;">Yükleniyor...</span>
+    </div>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">📝 Hakkında:</span><span class="data-value" style="font-size: 15px;">${data.profile.bio}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">🚀 Durum:</span><span class="data-value" style="font-size: 15px;">${data.profile.status}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">🌍 Ülke:</span><span class="data-value" style="font-size: 15px;">${data.profile.country}</span></p>
+    <p class="data-container" style="font-size: 15px;"><span class="data-label">🎮 Scratch Ekibi:</span><span class="data-value" style="font-size: 15px;">${data.scratchteam ? 'Evet' : 'Hayır'}</span></p>
+  `;
+
+  document.getElementById('scratch-data').innerHTML = userInfoHtml;
+
+
+  // Takipçi sayısını alın ve görüntüleyin
+  fetch("https://scratch.mit.edu/users/" + data.username + "/followers/")
+    .then(x => x.text())
+    .then(x => {
+      const followersCount = x.split('&raquo;')[1].split('(')[1].split(')')[0];
+      document.getElementById('followers-count').textContent =`${followersCount}`;
+    });
+
+  // Ayı isme çevirme işlevi
+  function getMonthName(monthNumber) {
+    var months = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+    return months[monthNumber];
+  }
+
+  // Haftanın gününün adını almak için işlev
+  function getDayOfWeek(dayNumber) {
+    var days = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+    return days[dayNumber];
+  }
+
+  // Okunmamış mesaj sayısını alın ve görüntüleyin
+  fetch(`https://api.scratch.mit.edu/users/${data.username}/messages/count`)
+    .then(response => response.json())
+    .then(countData => {
+      document.getElementById(`unread-messages-${data.username}`).textContent = countData.count;
+    })
+    .catch(error => {
+      console.error("Okunmamış mesaj sayısı alınamadı:", error);
+      document.getElementById(`unread-messages-${data.username}`).textContent = "Bilinmeyen Hata";
+    });
+
+  // Geçen süreyi her saniye güncelleme
+  function updateElapsedTime() {
+    const now = new Date();
+    const joinedDate = new Date(data.history.joined);
+    const timeDiff = now - joinedDate;
+
+    const years = Math.floor(timeDiff / (1000 * 60 * 60 * 24 * 365));
+    const months = Math.floor((timeDiff % (1000 * 60 * 60 * 24 * 365)) / (1000 * 60 * 60 * 24 * 30));
+    const days = Math.floor((timeDiff % (1000 * 60 * 60 * 24 * 30)) / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+
+    const elapsedTimeString = `${years} Yıl, ${months} Ay, ${days} Gün | ${hours} Saat, ${minutes} Dakika, ${seconds} Saniye Önce Katıldı.`;
+    document.getElementById(`elapsed-time-${data.username}`).textContent = elapsedTimeString;
+  }
+
+  updateElapsedTime();
+  setInterval(updateElapsedTime, 1000);
+
+  // Scratch Ekibi projelerini alın ve görüntüleyin
+  fetch(`https://scratch.mit.edu/site-api/users/all/username/${data.username}`)
+    .then(response => response.json())
+    .then(projectsData => {
+      var projectsHtml = '';
+      projectsData.forEach(project => {
+        projectsHtml += `
+          <p class="data-container"><span class="data-label">🎮 Scratch Ekibi:</span><span class="data-value">${project.featured_project_label_name} : ${project.title}</span></p>
+          <p><img src="${project.thumbnail_url}" alt="Proje Resmi" width="100"></p>
+        `;
+      });
+      document.getElementById('scratch-projects').innerHTML = projectsHtml;
+    })
+    .catch(error => {
+      console.error("Scratch Ekibi projeleri alınamadı:", error);
+      document.getElementById('scratch-projects').textContent = "Bilinmeyen Hata";
+    });
+}
+
+// Get and Display Scratch Team Projects
+function fecthHomescratch(data) {
+  fetch(`https://scratch.mit.edu/site-api/users/all/username/${data.username}`)
+    .then(response => response.json())
+    .then(projectsData => {
+      var projectsHtml = '';
+      projectsData.forEach(project => {
+        projectsHtml += `
+          <p class="data-container"><span class="data-label">🎮 Scratch Team:</span><span class="data-value">${project.featured_project_label_name} : ${project.title}</span></p>
+          <p><img src="${project.thumbnail_url}" alt="Project Image" width="100"></p>
+        `;
+      });
+      document.getElementById('scratch-projects').innerHTML = projectsHtml;
+    })
+    .catch(error => {
+      console.error("Failed to fetch Scratch Team projects:", error);
+      document.getElementById('scratch-projects').textContent = "Unknown Error";
+    });
+}
+
+// Kullanıcı Yorumlarını Alın ve Görüntüleyin
+function fetchUserComments(username) {
+  fetch(`https://scratch.mit.edu/site-api/comments/user/${username}/`)
+    .then(response => response.text())
+    .then(userComments => {
+      const userProfileComments = `
+        <p class="data-container" style="font-size: 20px; margin: 20px 0 10px 0;">Kullanıcı Yorumları</p>
+        ${userComments}
+      `;
+      document.getElementById('scratch-data').innerHTML = userProfileComments;
+    })
+    .catch(error => {
+      console.error("Kullanıcı Yorumları alınamadı:", error);
+      document.getElementById('scratch-data').textContent = "Bilinmeyen Hata";
+    });
+}
+
+function fetchUserNews() {
+  fetch("https://api.scratch.mit.edu/news")
+    .then(response => response.json())
+    .then(newsData => {
+      let newsHtml = `
+        <div style="display: flex; flex-wrap: wrap;">
+          <div style="flex: 1 1 100%; text-align: left;">
+            <h1 style="font-size: 24px; margin-bottom: 0;">Scratch News</h1>
+          </div>
+      `;
+
+      newsData.forEach(news => {
+        // Her haber için bir div oluşturun
+        newsHtml += `
+          <div style="flex: 0 0 calc(50% - 10px); margin: 5px; padding: 5px; background-color: transparent; display: flex; align-items: center;"> <!-- Arka plan şeffaf -->
+            <img src="${news.image}" alt="${news.headline}" style="margin-right: 10px; width: 80px; height: 80px;">
+            <div>
+              <h2 style="font-size: 20px; margin: 0;">${news.headline}</h2>
+              <p style="font-size: 14px; margin: 0;">${news.copy}</p>
+              <p style="font-size: 14px; margin: 0;">${new Date(news.stamp).toDateString()}</p>
+            </div>
+          </div>
+        `;
+      });
+
+      newsHtml += '</div>';
+      document.getElementById('scratch-data').innerHTML = newsHtml;
+    })
+    .catch(error => {
+      console.error("Haberler alınamadı:", error);
+      document.getElementById('scratch-data').textContent = "Bilinmeyen Hata";
+    });
+}
+
+
+
+// Kullanıcı Aktivitelerini Alın ve Görüntüleyin
+function fetchUserActivity(username) {
+  fetch(`https://scratch.mit.edu/messages/ajax/user-activity/?user=${username}&max=1000000`)
+    .then(response => response.text())
+    .then(userActivity => {
+      const userProfileActivity = `
+          <p class="data-container" style="font-size: 20px; margin: 20px 0 10px 0;">Kullanıcı Aktiviteleri</p>
+          ${userActivity}
+        </div>
+      `;
+      document.getElementById('scratch-data').innerHTML = userProfileActivity;
+    })
+    .catch(error => {
+      console.error("Kullanıcı Aktiviteleri alınamadı:", error);
+      document.getElementById('scratch-data').textContent = "Bilinmeyen Hata";
+    });
+}
+
+
+// Kullanıcı Forum sitesi
+function fetchUserForum(username) {
+  fetch(`https://scratch.mit.edu/discuss/m/1/`)
+    .then(response => response.text())
+    .then(userForum => {
+      const userProfileForum = `
+          <style>
+            .forum-container {
+              border-radius: 10px; /* Yumuşak kenarlar */
+              padding: 15px; /* Kenardan içeri boşluk */
+            }
+            .forum-container, .forum-container * {
+              color: white !important; /* Tüm yazıları beyaz yap */
+            }
+          </style>
+          <div class="forum-container">
+            <p class="data-container" style="font-size: 20px; margin: 20px 0 10px 0;">Scratch Forum</p>
+            ${userForum}
+          </div>
+        </div>
+      `;
+      document.getElementById('scratch-data').innerHTML = userProfileForum;
+    })
+    .catch(error => {
+      console.error("Kullanıcı Forumu alınamadı:", error);
+      document.getElementById('scratch-data').textContent = "Bilinmeyen Hata";
+    });
+}
+
+
+
+// Takipçileri al
+function fetchFollowers(username) {
+  var apiUrl = 'https://api.scratch.mit.edu/users/' + username + '/followers/?limit=40&offset=1';
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (data) {
+      displayFollowers(data);
+    })
+    .catch(function (error) {
+      console.log('Bir hata oluştu:', error);
+    });
+}
+// Takip edilen kullanıcıları getir
+function fetchFollowing(username) {
+  var apiUrl = 'https://api.scratch.mit.edu/users/' + username + '/following/?limit=40&offset=1';
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      displayFollowing(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+// Menüde takipçi bilgisini göster
+function displayFollowers(veri) {
+  var takipciHtml = `
+    <p>Takipçiler</p>
+    <ul>
+      ${veri.map((takipci, indeks) => `
+        <li>
+          <span style="font-size: 20px;">${indeks + 1}.</span>
+          <img src="${takipci.profile.images['90x90']}" alt="${takipci.username}" width="50" height="50" style="vertical-align: middle; margin-right: 5px; border: 2px solid white; border-radius: 50px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);">
+          <span style="font-size: 20px;">${takipci.username}</span>
+          <button style="background-color: black; color: white; border: 2px solid white; border-radius: 5px; padding: 5px; margin-left: 10px;">
+            <a href="https://scratch.mit.edu/users/${takipci.username}" style="text-decoration: none; color: white;">
+              🔍
+            </a>
+          </button>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = takipciHtml;
+}
+
+
+// Takip edilen kullanıcıların bilgisini menüde göster
+function displayFollowing(veri) {
+  var takipHtml = `
+    <p>Takip Edilenler</p>
+    <ul>
+    ${veri.map((takip, indeks) => `
+     <li>
+          <span style="font-size: 20px;">${indeks + 1}.</span>
+          <img src="${takip.profile.images['90x90']}" alt="${takip.username}" width="50" height="50" style="vertical-align: middle; margin-right: 5px; border: 2px solid white; border-radius: 50px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);">
+          <span style="font-size: 20px;">${takip.username}</span>
+          <button style="background-color: black; color: white; border: 2px solid white; border-radius: 5px; padding: 5px; margin-left: 10px;">
+            <a href="https://scratch.mit.edu/users/${takip.username}" style="text-decoration: none; color: white;">
+              🔍
+            </a>
+          </button>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = takipHtml;
+}
+
+// Kullanıcının projelerini getir
+function fetchProjects(username) {
+  var apiUrl = 'https://api.scratch.mit.edu/users/' + username + '/projects/?limit=40&offset=1';
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      displayProjects(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+function displayProjects(veri) {
+  var projelerHtml = `
+    <p>Oluşturulan Projeler</p>
+    <ul>
+      ${veri.map(proje => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/projects/${proje.id}" target="_blank" style="text-decoration: none; color: #007bff;">
+            <span style="font-size: 15px;">${proje.title}</span>
+          </a>
+          <br>
+          <a href="https://scratch.mit.edu/projects/${proje.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="https://uploads.scratch.mit.edu/get_image/project/${proje.id}_1000x1000.png" alt="${proje.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+          <div class="data-container">
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/fav-yellow.svg" width="19" height="19"> ${proje.stats.favorites}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/love-red.svg" width="19" height="19"> ${proje.stats.loves}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/views-gray.svg" width="19" height="19"> ${proje.stats.views}      </span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">📅 Oluşturulma Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.created)}</span>
+          </div>
+          <div class "data-container">
+            <span class="data-label">🚀 Paylaşılma Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.shared)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🔄 Güncelleme Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.modified)}</span>
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = projelerHtml;
+}
+
+// Favori projeleri getir
+function fetchFavoriteProjects(username) {
+  var apiUrl = 'https://api.scratch.mit.edu/users/' + username + '/favorites';
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      displayFavoriteProjects(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+// Menüde favori projeleri göster
+function displayFavoriteProjects(veri) {
+  var favoriProjelerHtml = `
+    <p>❤️ ve ⭐ Favori Projeler</p>
+    <ul>
+      ${veri.map(proje => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/projects/${proje.id}" target="_blank" style="text-decoration: none; color: #007bff;">
+            <span style="font-size: 15px;">${proje.title}</span>
+          </a>
+          <br>
+          <a href="https://scratch.mit.edu/projects/${proje.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="https://uploads.scratch.mit.edu/get_image/project/${proje.id}_1000x1000.png" alt="${proje.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+          <div class="data-container">
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/fav-yellow.svg" width="20" height="20"> ${proje.stats.favorites}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/love-red.svg" width="20" height="20"> ${proje.stats.loves}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/views-gray.svg" width="20" height="20"> ${proje.stats.views}      </span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">📅 Oluşturulma Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.created)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🚀 Paylaşılma Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.shared)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🔄 Güncelleme Tarihi: </span>
+            <span class="data-value">${formatDate(proje.history.modified)}</span>
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = favoriProjelerHtml;
+}
+
+// Tarihi biçimlendirme
+function formatDate(tarihDizesi) {
+  var tarih = new Date(tarihDizesi);
+  var biçimlendirilmişTarih = ('0' + tarih.getDate()).slice(-2) + '.' + ('0' + (tarih.getMonth() + 1)).slice(-2) + '.' + tarih.getFullYear() + ' - ' + ('0' + tarih.getHours()).slice(-2) + ':' + ('0' + tarih.getMinutes()).slice(-2);
+  return biçimlendirilmişTarih;
+}
+
+// Projeleri ara
+function searchProjects(aramaTerimi) {
+  var apiUrl = 'https://api.scratch.mit.edu/search/projects?q=%23=' + aramaTerimi;
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      displaySearchResults(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+// Menüde arama sonuçlarını göster
+function displaySearchResults(veri) {
+  var aramaSonuçlarıHtml = `
+    <p>Scratch Popüler Arama Sonuçları</p>
+    <ul>
+      ${veri.map(sonuç => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="text-decoration: none; color: #afdafc;">
+            <div style="display: flex; align-items: center;"> <!-- Kullanıcının fotoğrafını ve oluşturanı içeren esnek konteynır -->
+              <img src="https://uploads.scratch.mit.edu/get_image/user/${sonuç.author.id}_90x90.png" alt="${sonuç.author.username}" width="40" height="40" style="border-radius: 30%; margin-right: 5px;">
+              <div>
+                <a href="https://scratch.mit.edu/users/${sonuç.author.username}" target="_blank" style="font-size: 15px; color: #007bff; text-decoration: underline;">${sonuç.author.username}</a>
+                <br>
+                <span style="font-size: 15px;">${sonuç.title}</span>
+              </div>
+            </div>
+          </a>
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="https://uploads.scratch.mit.edu/get_image/project/${sonuç.id}_1000x1000.png" alt="${sonuç.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+          <div class="data-container">
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/fav-yellow.svg" width="20" height="20"> ${sonuç.stats.favorites}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/love-red.svg" width="20" height="20"> ${sonuç.stats.loves}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/views-gray.svg" width="20" height="20"> ${sonuç.stats.views}      </span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">📅 Oluşturulma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.created)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🚀 Paylaşılma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.shared)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🔄 Güncelleme Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.modified)}</span>
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = aramaSonuçlarıHtml;
+}
+
+// Trend projeleri ara
+function search2Projects(arama2Terimi) {
+  var apiUrl = 'https://api.scratch.mit.edu/search/projects?mode=trending&q=' + arama2Terimi;
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      displaySearch2Results(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+// Trending arama sonuçlarını menüde göster
+function displaySearch2Results(veri) {
+  var arama2SonuçlarıHtml = `
+    <p>Scratch Trending Arama Sonuçları</p>
+    <ul>
+      ${veri.map(sonuç => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="text-decoration: none; color: #afdafc;">
+            <div style="display: flex; align-items: center;"> <!-- Kullanıcının fotoğrafını ve oluşturanı içeren esnek konteynır -->
+              <img src="https://uploads.scratch.mit.edu/get_image/user/${sonuç.author.id}_90x90.png" alt "${sonuç.author.username}" width="40" height="40" style="border-radius: 30%; margin-right: 5px;">
+              <div>
+                <a href="https://scratch.mit.edu/users/${sonuç.author.username}" target="_blank" style="font-size: 15px; color: #007bff; text-decoration: underline;">${sonuç.author.username}</a>
+                <br>
+                <span style="font-size: 15px;">${sonuç.title}</span>
+              </div>
+            </div>
+          </a>
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="https://uploads.scratch.mit.edu/get_image/project/${sonuç.id}_1000x1000.png" alt="${sonuç.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+          <div class "data-container">
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/fav-yellow.svg" width="20" height="20"> ${sonuç.stats.favorites}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/love-red.svg" width="20" height="20"> ${sonuç.stats.loves}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/views-gray.svg" width="20" height="20"> ${sonuç.stats.views}      </span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">📅 Oluşturulma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.created)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🚀 Paylaşılma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.shared)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🔄 Güncelleme Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.modified)}</span>
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = arama2SonuçlarıHtml;
+}
+
+// Projeleri keşfet
+function exploreProjects(aramaTerimi) {
+  var apiUrl = 'https://api.scratch.mit.edu/explore/projects?limit=40&offset=0&language=Turkey&mode=trending&q=*';
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (veri) {
+      exploreProjectsResults(veri);
+    })
+    .catch(function (hata) {
+      console.log('Bir hata oluştu:', hata);
+    });
+}
+
+// Uzun proje başlıklarını kırpma işlevi
+function truncateTitle(başlık, maksimumUzunluk) {
+  return başlık.length > maksimumUzunluk ? başlık.slice(0, maksimumUzunluk - 3) + '...' : başlık;
+}
+
+// Menüde keşif sonuçlarını göster
+function exploreProjectsResults(veri) {
+  var keşifSonuçlarıHtml = `
+    <p>Scratch Keşfet</p>
+    <ul>
+      ${veri.map(sonuç => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="text-decoration: none; color: #afdafc;">
+            <div style="display: flex; align-items: center;"> <!-- Kullanıcının fotoğrafını ve oluşturanı içeren esnek konteynır -->
+              <img src="https://uploads.scratch.mit.edu/get_image/user/${sonuç.author.id}_90x90.png" alt="${sonuç.author.username}" width="40" height="40" style="border-radius: 30%; margin-right: 5px;">
+              <div>
+                <a href="https://scratch.mit.edu/users/${sonuç.author.username}" target="_blank" style="font-size: 15px; color: #007bff; text-decoration: underline;">${sonuç.author.username}</a>
+                <br>
+                <span style="font-size: 15px;">${truncateTitle(sonuç.title, 14)}</span>
+              </div>
+            </div>
+          </a>
+          <a href="https://scratch.mit.edu/projects/${sonuç.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="https://uploads.scratch.mit.edu/get_image/project/${sonuç.id}_1000x1000.png" alt="${sonuç.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+          <div class="data-container">
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/fav-yellow.svg" width="20" height="20"> ${sonuç.stats.favorites}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/love-red.svg" width="20" height="20"> ${sonuç.stats.loves}      </span>
+            <span class="data-label"><img src="https://scratch.mit.edu/svgs/project/views-gray.svg" width="20" height="20"> ${sonuç.stats.views}      </span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">📅 Oluşturulma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.created)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🚀 Paylaşılma Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.shared)}</span>
+          </div>
+          <div class="data-container">
+            <span class="data-label">🔄 Güncelleme Tarihi: </span>
+            <span class="data-value">${formatDate(sonuç.history.modified)}</span>
+          </div>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = keşifSonuçlarıHtml;
+}
+
+// Kullanıcının stüdyolarını getir
+function fetchStudios(username) {
+  var apiUrl = `https://api.scratch.mit.edu/users/${username}/studios/curate`;
+  fetch(apiUrl)
+    .then(function (response) {
+      return response.json();
+    })
+    .then(function (data) {
+      displayStudios(data);
+    })
+    .catch(function (error) {
+      console.log('Bir hata oluştu:', error);
+    });
+}
+
+function displayStudios(data) {
+  var studiosHtml = `
+    <p>Olduğu Stüdyolar</p>
+    <ul>
+      ${data.map(studio => `
+        <li style="margin-bottom: 35px;">
+          <a href="https://scratch.mit.edu/studios/${studio.id}" target="_blank" style="text-decoration: none; color: #007bff;">
+            <span style="font-size: 15px;">${studio.title}</span>
+          </a>
+          <br>
+          <a href="https://scratch.mit.edu/studios/${studio.id}" target="_blank" style="display: inline-block; box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3); border-radius: 5px; overflow: hidden;">
+            <img src="${studio.image}" alt="${studio.title}" width="200" height="150" style="border: 2px solid white;">
+          </a>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+  document.getElementById('scratch-data').innerHTML = studiosHtml;
+}
+
+
+// Menüyü temizle
+function clearMenu() {
+  document.getElementById('scratch-data').innerHTML = '';
+}
+
+// Takipçiler butonuna tıklandığında
+document.getElementById('followers-button').addEventListener('click', function () {
+  var kullaniciAdi = document.getElementById('username').value;
+  clearMenu();
+  fetchFollowers(kullaniciAdi);
+});
+
+// Takip edilenler butonuna tıklandığında
+document.getElementById('following-button').addEventListener('click', function () {
+  var kullaniciAdi = document.getElementById('username').value;
+  clearMenu();
+  fetchFollowing(kullaniciAdi);
+});
+
+// Projeler butonuna tıklandığında
+document.getElementById('projects-button').addEventListener('click', function () {
+  var kullaniciAdi = document.getElementById('username').value;
+  clearMenu();
+  fetchProjects(kullaniciAdi);
+});
+
+// Favori projeler butonuna tıklandığında
+document.getElementById('favorite-projects-button').addEventListener('click', function () {
+  var kullaniciAdi = document.getElementById('username').value;
+  clearMenu();
+  fetchFavoriteProjects(kullaniciAdi);
+});
+
+// Arama butonuna tıklandığında
+document.getElementById('search-button').addEventListener('click', function () {
+  var aramaTerimi = document.getElementById('search-term').value;
+  clearMenu();
+  searchProjects(aramaTerimi);
+});
+
+// Trending arama butonuna tıklandığında
+document.getElementById('search2-button').addEventListener('click', function () {
+  var arama2Terimi = document.getElementById('search2-term').value;
+  clearMenu();
+  search2Projects(arama2Terimi);
+});
+
+// Keşfet butonuna tıklandığında
+document.getElementById('explore-button').addEventListener('click', function () {
+  clearMenu();
+  exploreProjects();
+});
+
+})();
