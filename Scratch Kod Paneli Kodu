@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Tampermonkey Scratch Kod Paneli
+// @name         SC TR PANELİ
 // @namespace    http://tampermonkey.net/
-// @version      56.0
+// @version      57.0
 // @description  Kullanıcı bilgileri için Scratch veri menüsünü gösterir.
 // @author       games-coder
 // @match        https://scratch.mit.edu/*
@@ -169,6 +169,7 @@ document.addEventListener('keydown', function (event) {
 });
 
 
+
   // Menüyü sürükle ve taşı ve ortala
 var menu = document.getElementById('scratch-menu');
 var menuHeader = document.getElementById('scratch-menu-header');
@@ -319,7 +320,7 @@ function displayUserInfo(data) {
 
   var userInfoHtml = `
     <p class="data-container" style="font-size: 20px; margin: 10px 0;"><span class="data-value">${data.username}</span></p>
-    <p><img src="${data.profile.images['90x90']}" alt="Profil Resmi" style="border: 3px solid white; width: 180px; height: 180px; border-radius: 20px;"></p>
+    <p><img src="${data.profile.images['90x90']}" alt="Profil Resmi" style="border: 3px solid white; width: 300px; height: 300px; border-radius: 20px;"></p>
     <p class="data-container" style="font-size: 15px;"><a href="https://scratch.mit.edu/users/${data.username}/" target="_blank">↗️ Scratch'te profili aç</a></p>
     <p class="data-container" style="font-size: 15px;"><span class="data-label">🔍 Kimlik:</span><span class="data-value">${data.id}</span></p>
     <p class="data-container" style="font-size: 15px;"><span class="data-label">👤 Kullanıcı Adı:</span><span class="data-value">${data.username}</span></p>
